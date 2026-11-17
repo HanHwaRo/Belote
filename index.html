@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tournoi de belote</title>
+<style>
+:root{--bg:#f6f4ef;--carte:#fff;--txt:#222;--doux:#777;--acc:#a8282d;--bord:#ddd8cc;--sel:#fde9a8}
+@media(prefers-color-scheme:dark){:root{--bg:#1c1b19;--carte:#2a2926;--txt:#eee;--doux:#999;--acc:#e0575c;--bord:#444;--sel:#6b5a1a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px system-ui,sans-serif;padding:1rem}
+h1{margin:.2rem 0 1rem;color:var(--acc)}
+h2{margin:.2rem 0 .6rem;font-size:1.1rem}
+main{max-width:1100px;margin:auto;display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+section{background:var(--carte);border:1px solid var(--bord);border-radius:10px;padding:1rem}
+.large{grid-column:1/-1}
+textarea{width:100%;height:16rem;font:inherit;padding:.5rem;background:var(--bg);color:var(--txt);border:1px solid var(--bord);border-radius:6px}
+button,select{font:inherit;padding:.4rem .8rem;border-radius:6px;border:1px solid var(--bord);background:var(--bg);color:var(--txt);cursor:pointer}
+button.p{background:var(--acc);color:#fff;border-color:var(--acc)}
+.barre{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.6rem 0}
+.doux{color:var(--doux);font-size:.9em}
+.err{color:var(--acc);font-weight:600}
+.equipes{display:grid;gap:.4rem}
+.eq{display:flex;gap:.4rem;align-items:center}
+.eq b{width:2.2rem;color:var(--doux);font-weight:600}
+.j{flex:1;padding:.35rem .6rem;border:1px solid var(--bord);border-radius:6px;cursor:pointer;background:var(--bg)}
+.j.sel{background:var(--sel)}
+.j small{color:var(--doux)}
+.rondes{display:grid;gap:.8rem;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.ronde{border:1px solid var(--bord);border-radius:8px;padding:.6rem}
+.ronde h3{margin:0 0 .4rem;font-size:.95rem;color:var(--acc)}
+.m{display:flex;gap:.4rem;padding:.15rem 0}.m>span:first-child{color:var(--doux);width:4.5rem}
+.m i{color:var(--doux)}
+input.sc{width:3.8rem;padding:.2rem;font:inherit;text-align:center;background:var(--bg);color:var(--txt);border:1px solid var(--bord);border-radius:5px}
+.m .nom{flex:1}.m .nom.d{text-align:right}
+table{border-collapse:collapse;width:100%}th,td{padding:.3rem .5rem;text-align:right;border-bottom:1px solid var(--bord)}
+th:nth-child(2),td:nth-child(2){text-align:left}tr.top td{font-weight:700}
+.tw{overflow-x:auto}
+.repos{color:var(--doux);font-style:italic}
+@media print{body{background:#fff;color:#000}.noprint{display:none}section{border:none}main{display:block}}
+</style>
+</head>
+<body>
+<h1>♠ Tournoi de belote ♥</h1>
+<main>
+<section class="noprint">
+  <h2>1. Les joueurs</h2>
+  <textarea id="joueurs" placeholder="Un joueur par ligne.&#10;Niveau facultatif après un point-virgule (de 1 à 5) :&#10;Alice;4&#10;Bob;2"></textarea>
+  <div class="barre"><span id="compte" class="doux"></span></div>
+  <div class="barre">
+    <select id="mode">
+      <option value="hasard">Tirage au sort</option>
+      <option value="equilibre">Équilibré par niveau (fort + faible)</option>
+    </select>
+    <button class="p" id="tirer">Former les équipes</button>
+  </div>
+  <div id="erreur1" class="err"></div>
+</section>
+
+<section>
+  <h2>2. Les équipes</h2>
+  <div id="equipes" class="equipes"><span class="doux">Aucune équipe pour l'instant.</span></div>
+  <p class="doux noprint">Cliquez sur deux joueurs pour les échanger.</p>
+  <div class="barre noprint">
+    <select id="retour">
+      <option value="aucun">Championnat aller simple</option>
+      <option value="pur">Championnat aller-retour</option>
+    </select>
+    <button class="p" id="champ">Générer le championnat</button>
+  </div>
+  <div id="erreur2" class="err"></div>
+</section>
+
+<section class="large" id="resultat" hidden>
+  <h2>3. Le championnat <button class="noprint" onclick="window.print()" style="float:right">Imprimer</button></h2>
+  <div id="info" class="doux"></div>
+  <div class="barre noprint doux">Victoire <select id="pv"><option>3</option><option selected>2</option><option>1</option></select> pt(s) · nul <select id="pn"><option>0</option><option selected>1</option></select> pt · saisissez les points de chaque équipe (ex. 82 – 80) ; un match vide n'est pas compté.</div>
+  <div id="rondes" class="rondes"></div>
+</section>
+
+<section class="large" id="classement" hidden>
+  <h2>4. Classement</h2>
+  <div class="tw"><table id="tab"></table></div>
+  <p class="doux">Départage : points de classement, puis différence de points de jeu, puis points marqués.</p>
+</section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let equipes = [];   // [[joueur, joueur], ...], joueur = {nom, niveau}
+let sel = null;
+
+function lire(){
+  return $('joueurs').value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{
+    const [nom, niv] = l.split(/[;\t]/).map(s=>s.trim());
+    const v = parseFloat((niv||'').replace(',','.'));
+    return {nom, niveau: isNaN(v) ? null : v};
+  });
+}
+function compte(){
+  const n = lire().length;
+  $('compte').textContent = n + ' joueur' + (n>1?'s':'') + (n%2 ? ' — il en faut un nombre pair' : n ? ' → ' + n/2 + ' équipes' : '');
+}
+function melange(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+
+$('joueurs').addEventListener('input', compte);
+$('tirer').onclick = () => {
+  $('erreur1').textContent='';
+  const J = lire();
+  if (J.length < 4 || J.length % 2){ $('erreur1').textContent='Il faut un nombre pair de joueurs, au moins 4.'; return; }
+  if (new Set(J.map(j=>j.nom.toLowerCase())).size < J.length){ $('erreur1').textContent='Deux joueurs ont le même nom : distinguez-les.'; return; }
+  let paires = [];
+  if ($('mode').value === 'hasard'){
+    const m = melange(J);
+    for (let i=0;i<m.length;i+=2) paires.push([m[i], m[i+1]]);
+  } else {
+    // tri par niveau décroissant (égalités au hasard), moitié forte appariée au hasard avec la moitié faible
+    const tri = melange(J).sort((a,b)=>(b.niveau||0)-(a.niveau||0));
+    const h = tri.length/2, forts = tri.slice(0,h), faibles = melange(tri.slice(h));
+    paires = forts.map((f,i)=>[f, faibles[i]]);
+  }
+  equipes = melange(paires); sel = null; $('resultat').hidden = true; $('classement').hidden = true; journees = []; scores = {}; dessiner();
+};
+
+function nomEquipe(e){ return e[0].nom + ' & ' + e[1].nom; }
+function dessiner(){
+  const c = $('equipes'); c.innerHTML='';
+  equipes.forEach((e,i)=>{
+    const d = document.createElement('div'); d.className='eq';
+    d.innerHTML = '<b>' + (i+1) + '</b>';
+    e.forEach((j,k)=>{
+      const b = document.createElement('div');
+      b.className = 'j' + (sel && sel[0]===i && sel[1]===k ? ' sel':'');
+      b.textContent = j.nom; 
+      if (j.niveau!==null){const s=document.createElement('small'); s.textContent=' ('+j.niveau+')'; b.append(s)}
+      b.onclick = () => {
+        if (!sel) sel=[i,k];
+        else { const [a,bb]=sel; [equipes[a][bb],equipes[i][k]]=[equipes[i][k],equipes[a][bb]]; sel=null; $('resultat').hidden=true; $('classement').hidden=true; journees=[]; scores={} }
+        dessiner();
+      };
+      d.append(b);
+    });
+    c.append(d);
+  });
+}
+
+$('champ').onclick = async () => {
+  $('erreur2').textContent='';
+  if (!equipes.length){ $('erreur2').textContent="Formez d'abord les équipes."; return; }
+  const noms = equipes.map(nomEquipe);
+  const r = await fetch('/api/championnat',{method:'POST',body:JSON.stringify({equipes:noms,retour:$('retour').value})});
+  const d = await r.json();
+  if (d.erreur){ $('erreur2').textContent=d.erreur; return; }
+  journees = d.journees; nomsCourants = noms; scores = {};
+  afficher(); $('resultat').scrollIntoView({behavior:'smooth'});
+};
+let journees = [], nomsCourants = [], scores = {};
+function afficher(){
+  const noms = nomsCourants, n = noms.length, nb = journees.length;
+  $('info').textContent = n + ' équipes · ' + nb + ' tours · chaque équipe rencontre toutes les autres' + (nb > (n%2 ? n : n-1) ? ' deux fois' : ' une fois') + (n%2 ? ' · une équipe se repose à chaque tour' : '') + '.';
+  const R = $('rondes'); R.innerHTML='';
+  journees.forEach((t,i)=>{
+    const div = document.createElement('div'); div.className='ronde';
+    div.innerHTML = '<h3>Tour ' + (i+1) + '</h3>';
+    t.matchs.forEach((m,k)=>{
+      const key = i+'-'+k, v = scores[key] || ['',''];
+      const l = document.createElement('div'); l.className='m';
+      l.innerHTML = '<span>Table '+(k+1)+'</span><span class="nom d">'+esc(noms[m[0]])+'</span>'
+        + '<input class="sc" type="number" min="0" value="'+v[0]+'"><i>–</i><input class="sc" type="number" min="0" value="'+v[1]+'">'
+        + '<span class="nom">'+esc(noms[m[1]])+'</span>';
+      const ins = l.querySelectorAll('input');
+      const maj = () => { scores[key] = [ins[0].value, ins[1].value]; classer(); };
+      ins.forEach(x => x.oninput = maj);
+      div.append(l);
+    });
+    t.repos.forEach(x=>{ const l=document.createElement('div'); l.className='m repos'; l.innerHTML='<span>Repos</span><span class="nom">'+esc(noms[x])+'</span>'; div.append(l); });
+    R.append(div);
+  });
+  $('resultat').hidden = false; classer();
+}
+function classer(){
+  const noms = nomsCourants, pv = +$('pv').value, pn = +$('pn').value;
+  const L = noms.map((nom,i)=>({i,nom,J:0,V:0,N:0,D:0,pour:0,contre:0,pts:0}));
+  journees.forEach((t,ti)=>t.matchs.forEach((m,k)=>{
+    const v = scores[ti+'-'+k]; if (!v || v[0]==='' || v[1]==='') return;
+    const a = +v[0], b = +v[1], A = L[m[0]], B = L[m[1]];
+    A.J++; B.J++; A.pour+=a; A.contre+=b; B.pour+=b; B.contre+=a;
+    if (a>b){A.V++;B.D++;A.pts+=pv} else if (a<b){B.V++;A.D++;B.pts+=pv} else {A.N++;B.N++;A.pts+=pn;B.pts+=pn}
+  }));
+  L.sort((x,y)=>y.pts-x.pts || (y.pour-y.contre)-(x.pour-x.contre) || y.pour-x.pour || x.i-y.i);
+  let h = '<tr><th>#</th><th>Équipe</th><th>J</th><th>V</th><th>N</th><th>D</th><th>Pour</th><th>Contre</th><th>Diff</th><th>Pts</th></tr>';
+  L.forEach((e,r)=>{ h += '<tr'+(r===0&&e.J?' class="top"':'')+'><td>'+(r+1)+'</td><td>'+esc(e.nom)+'</td><td>'+e.J+'</td><td>'+e.V+'</td><td>'+e.N+'</td><td>'+e.D+'</td><td>'+e.pour+'</td><td>'+e.contre+'</td><td>'+(e.pour-e.contre)+'</td><td>'+e.pts+'</td></tr>'; });
+  $('tab').innerHTML = h; $('classement').hidden = false;
+  try { localStorage.setItem('belote', JSON.stringify({equipes, journees, nomsCourants, scores, joueurs:$('joueurs').value, pv:$('pv').value, pn:$('pn').value})); } catch(e){}
+}
+$('pv').onchange = $('pn').onchange = classer;
+function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+try {
+  const sv = JSON.parse(localStorage.getItem('belote') || 'null');
+  if (sv){ $('joueurs').value = sv.joueurs||''; equipes = sv.equipes||[]; journees = sv.journees||[]; nomsCourants = sv.nomsCourants||[]; scores = sv.scores||{};
+    $('pv').value = sv.pv; $('pn').value = sv.pn; if (equipes.length) dessiner(); if (journees.length) afficher(); }
+} catch(e){}
+compte();
+</script>
+</body>
+</html>
